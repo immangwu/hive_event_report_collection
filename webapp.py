@@ -642,18 +642,6 @@ class StreamlitUI:
             for kpi in activity_info['kpis']:
                 st.warning(f"✓ {kpi}")
         
-        # Basic Event Details
-        st.markdown('<h3 class="sub-header">📝 Event Details</h3>', unsafe_allow_html=True)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            event_data.event_title = st.text_input("Event Title*", 
-                                                   value=activity_info['name'],
-                                                   help="Official title of the event")
-            event_data.start_date = st.date_input("Start Date*")
-            event_data.duration_hours = st.number_input("Duration (hours)*", 
-                                                       min_value=1, 
-                                                       max_value=72, 
                                                        value=4)
         
         with col2:
