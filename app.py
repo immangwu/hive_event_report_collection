@@ -63,6 +63,21 @@ if not os.path.exists("logos") or not os.listdir("logos"):
     st.sidebar.warning("⚠️ 'logos' folder is empty or missing! PDF header will be incomplete.")
     st.sidebar.markdown("Please add: `snr_logo.png`, `srit_logo.png`, `hive.png`, `sish.png`, `mic.png`, `aicte.png`, `iic.png`, `idea_lab.png`")
 
+# Test Connection Button
+if st.sidebar.button("🧪 Test Google Sheet Connection"):
+    try:
+        ds, ss = utils.get_google_services()
+        if ss:
+            test_data = {"Program Name": "TEST_CONNECTION", "Activity Type": "Test", "Timestamp": str(datetime.now())}
+            if utils.append_to_sheet(ss, config.GOOGLE_SHEET_ID, test_data):
+                st.sidebar.success("✅ Connected to 'IIC8 reports'!")
+            else:
+                st.sidebar.error("❌ Write Failed")
+        else:
+            st.sidebar.error("❌ Auth Failed")
+    except Exception as e:
+        st.sidebar.error(f"Error: {e}")
+
 # --- Main App ---
 st.markdown('<div class="main-header">📝 Event Report Submission Portal</div>', unsafe_allow_html=True)
 

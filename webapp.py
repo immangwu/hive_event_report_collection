@@ -220,9 +220,58 @@ class GoogleServicesManager:
         genai.configure(api_key=gemini_api_key)
         self.gemini_model = genai.GenerativeModel('gemini-pro')
     
+    def ensure_sheet_exists(self, spreadsheet_id: str, sheet_name: str) -> bool:
+        """Ensure the sheet exists, create if not"""
+        try:
+            spreadsheet = self.sheets_service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+            sheets = spreadsheet.get('sheets', [])
+            exists = any(s['properties']['title'] == sheet_name for s in sheets)
+                    spreadsheetId=spreadsheet_id,
+                    body=body
+                ).execute()
+                
+                # Add Headers
+                headers = [
+                    "Timestamp", "Activity Type", "Calendar Activity", "Program Theme", "Event Level",
+                    "Event Title", "Start Date", "End Date", "Duration (Hours)", "Mode of Delivery",
+                    "Venue", "Activity Lead", "Internal Students", "Internal Faculty", 
+                    "External Students", "External Faculty", "Total Participants", 
+                    "Num Resource Persons", "Resource Person Details", "Total Expenditure",
+                    "Objectives", "Benefits", "Outcomes", "Feedback Received", "Feedback Summary",
+                    "KPI Achievements", "PDF Report URL", "Document URLs", "Photo URLs", 
+                    "Video URL", "Remarks"
+                ]
+                
+                self.sheets_service.spreadsheets().values().update(
+                    spreadsheetId=spreadsheet_id,
+                    range=f"{sheet_name}!A1",
+                    valueInputOption='RAW',
+                    body={'values': [headers]}
+                ).execute()
+                print("DEBUG: Headers added to new sheet")
+                
+            return True
+        except Exception as e:
+            print(f"DEBUG: Error ensuring sheet exists: {e}")
+            st.error(f"Error creating sheet: {e}")
+            return False
+
     def write_to_sheets(self, spreadsheet_id: str, range_name: str, values: List[List]) -> bool:
         """Write data to Google Sheets"""
         try:
+            # Extract sheet name from range (e.g., "Sheet1!A:AE" -> "Sheet1")
+            sheet_name = range_name.split('!')[0]
+            if not self.ensure_sheet_exists(spreadsheet_id, sheet_name):
+                return False
+
+            print(f"DEBUG: Attempting to write to sheet. ID: {spreadsheet_id}, Range: {range_name}")
+            print(f"DEBUG: Values to write: {values}")
+            
+            if not self.sheets_service:
+                print("DEBUG: Sheets service is None!")
+                st.error("❌ Google Sheets service not initialized.")
+                return False
+
             body = {'values': values}
             result = self.sheets_service.spreadsheets().values().append(
                 spreadsheetId=spreadsheet_id,
@@ -231,8 +280,11 @@ class GoogleServicesManager:
                 insertDataOption='INSERT_ROWS',
                 body=body
             ).execute()
+            
+            print(f"DEBUG: Write result: {result}")
             return True
         except Exception as e:
+            print(f"DEBUG: Error writing to sheets: {e}")
             st.error(f"Error writing to sheets: {str(e)}")
             return False
     
@@ -1079,23 +1131,6 @@ Participants: {total_participants}
 Objectives: {event_data.objectives}
 Benefits: {event_data.benefits}
 
-Include: Summary, Execution, Engagement, Achievements, Impact, Recommendations."""
-                
-                event_data.outcomes = google_services.generate_content_with_ai(prompt)
-                st.session_state['sd_generated_outcomes'] = event_data.outcomes
-        
-        event_data.outcomes = st.text_area("Overall Event Outcomes*", 
-                                          value=st.session_state.get('sd_generated_outcomes', ''),
-                                          height=300)
-        
-        # Feedback
-        st.markdown('<h3 class="sub-header">📝 Feedback</h3>', unsafe_allow_html=True)
-        event_data.feedback_received = st.checkbox("Was feedback received?")
-        if event_data.feedback_received:
-            event_data.feedback_summary = st.text_area("Feedback Summary*", height=150)
-        
-        # Remarks
-        event_data.remarks = st.text_area("Additional Remarks", height=100)
         
         # Documents (same structure)
         st.markdown('<h3 class="sub-header">📎 Document Uploads</h3>', unsafe_allow_html=True)

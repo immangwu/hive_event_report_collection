@@ -278,18 +278,98 @@ def upload_to_drive(drive_service, file_obj, filename, folder_id, mimetype=None)
         return None
 
 # --- Google Sheets Integration ---
-def append_to_sheet(sheets_service, spreadsheet_id, values):
-    """Appends a row of data to Google Sheets."""
+# --- Google Sheets Integration ---
+def ensure_sheet_exists(sheets_service, spreadsheet_id, sheet_name="IIC8 reports"):
+    """Ensure the sheet exists, create if not, and add headers."""
     try:
+        spreadsheet = sheets_service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
+        sheets = spreadsheet.get('sheets', [])
+        exists = any(s['properties']['title'] == sheet_name for s in sheets)
+        
+        headers = [
+            "Timestamp", "Academic Year", "Quarter", "Activity Type", "Program Type", 
+            "Program Name", "Program Theme", "Activity Lead", "Collaborating Department",
+            "Level", "Mode", "Start Date", "End Date", "Duration", 
+            "Student Participants", "Faculty Participants", "External Students", "External Faculty",
+            "Total Income", "Total Expense", "Net Balance", "Financial Details",
+            "Objective", "Benefits", "Minute to Minute", "SDG Goals", "Program Outcomes",
+            "Video URL", "Social Media", 
+            "Feedback Count", "Total Attended", "Male Count", "Female Count",
+            "Dept1", "Dept1 Count", "Dept2", "Dept2 Count", "Dept3", "Dept3 Count",
+            "5 Star Count", "4 Star Count", "High Star Perc", 
+            "Exp Score", "Cont Score", "Speak Score", "Avg Sat", "Target Met",
+            "Know Before", "Know After", "Know Gain", 
+            "Apply Learn Count", "Apply Learn Perc", "Got Ideas", "Work Ideas",
+            "Interest Ent", "Want Mentor", "Top Liked", "Top Improve", "Recommend Perc",
+            "Plan Rating", "Exec Rating", "Speak Rating", "Learn Rating", "Innov Rating", "Budget Rating",
+            "Avg Score", "Obj Achieved", "Prom Ideas", "Mentor Teams", "Budget Used Perc",
+            "Big Challenge", "Best Thing", "Improve Next", "Success Story", "Acknowledgement",
+            "Report Link", "AI Report Content"
+        ]
+
+        if not exists:
+            print(f"Creating new sheet '{sheet_name}'")
+            body = {
+                'requests': [{
+                    'addSheet': {
+                        'properties': {
+                            'title': sheet_name
+                        }
+                    }
+                }]
+            }
+            sheets_service.spreadsheets().batchUpdate(
+                spreadsheetId=spreadsheet_id,
+                body=body
+            ).execute()
+            
+            # Add Headers
+            sheets_service.spreadsheets().values().update(
+                spreadsheetId=spreadsheet_id,
+                range=f"{sheet_name}!A1",
+                valueInputOption='RAW',
+                body={'values': [headers]}
+            ).execute()
+            
+        return headers
+    except Exception as e:
+        print(f"Error ensuring sheet exists: {e}")
+        return []
+
+def append_to_sheet(sheets_service, spreadsheet_id, data, sheet_name="IIC8 reports"):
+    """Appends a row of data to Google Sheets. Handles dict or list."""
+    try:
+        headers = ensure_sheet_exists(sheets_service, spreadsheet_id, sheet_name)
+        
+        row_values = []
+        if isinstance(data, dict):
+            # Map dict to headers
+            row_values = [datetime.now().strftime('%Y-%m-%d %H:%M:%S')] # Timestamp first
+            # Start from index 1 in headers (skip Timestamp)
+            for header in headers[1:]:
+                val = data.get(header, "")
+                # Convert list/dict to string
+                if isinstance(val, (list, dict)):
+                    val = str(val)
+                row_values.append(val)
+        else:
+            # Assume list
+            row_values = data
+
         body = {
-            'values': [values]
+            'values': [row_values]
         }
         result = sheets_service.spreadsheets().values().append(
-            spreadsheetId=spreadsheet_id, range="Sheet1!A1",
-            valueInputOption="USER_ENTERED", body=body).execute()
+            spreadsheetId=spreadsheet_id, 
+            range=f"{sheet_name}!A1",
+            valueInputOption="USER_ENTERED", 
+            insertDataOption="INSERT_ROWS",
+            body=body).execute()
+            
         return result
     except Exception as e:
-        return f"Sheet Log Failed: {str(e)}"
+        print(f"Sheet Log Failed: {str(e)}")
+        return None
 
 # --- PDF Generation ---
 def sanitize_image(image_path):
