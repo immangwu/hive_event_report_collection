@@ -13,5 +13,8 @@ token.pickle
 # Generated Reports
 *.pdf
 
+# Executables
+*.exe
+
 # Streamlit
 .streamlit/

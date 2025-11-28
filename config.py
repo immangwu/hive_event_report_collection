@@ -156,8 +156,24 @@ PROGRAM_OUTCOMES = [
 ]
 
 # --- Secrets / Configuration ---
-# PASTE YOUR KEYS HERE
-GEMINI_API_KEY = "AIzaSyBroP0gUmaudXoNYt73JWEtlWEMt7z-_ZI"
-GOOGLE_SHEET_ID = "13Pkhj_igbp7UsUb2-PWYqYA-_dYNMaQHr-hZveWf2v8"
-DRIVE_PARENT_FOLDER_ID = "1eX8HO41TlVScAs4648JyMOl9U-JbjDe1"
+# Keys are now loaded from .streamlit/secrets.toml or environment variables
+import os
+try:
+    import streamlit as st
+    # Accessing st.secrets might fail if not running via streamlit or if file missing
+    # We use a safe access pattern
+    secrets = st.secrets
+except Exception:
+    secrets = {}
+
+def get_secret(key, default=""):
+    # Try Streamlit secrets first
+    if secrets and key in secrets:
+        return secrets[key]
+    # Fallback to environment variables
+    return os.environ.get(key, default)
+
+GEMINI_API_KEY = get_secret("GEMINI_API_KEY")
+GOOGLE_SHEET_ID = get_secret("GOOGLE_SHEET_ID")
+DRIVE_PARENT_FOLDER_ID = get_secret("DRIVE_PARENT_FOLDER_ID")
 
