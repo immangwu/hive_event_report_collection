@@ -1124,47 +1124,6 @@ def main():
         st.header("⚙️ Configuration")
         
         # Google Gemini API Key
-        gemini_api_key = st.text_input("Google Gemini API Key*", 
-                                       type="password",
-                                       help="Enter your Google Gemini API key")
-        
-        # Google Service Account JSON
-        st.markdown("##### Google Service Account")
-        service_account_json = st.file_uploader("Upload Service Account JSON*",
-                                               type=['json'],
-                                               help="Upload your Google service account JSON file")
-        
-        # Google Sheets Configuration
-        st.markdown("##### Google Sheets Configuration")
-        spreadsheet_id = st.text_input("Spreadsheet ID*",
-                                      help="Enter your Google Sheets ID")
-        sheet_name = st.text_input("Sheet Name*", 
-                                  value="Event Reports",
-                                  help="Name of the sheet to write data")
-        
-        # Google Drive Configuration
-        st.markdown("##### Google Drive Configuration")
-        drive_folder_id = st.text_input("Drive Folder ID*",
-                                       help="Enter the Google Drive folder ID for uploads")
-        
-        st.markdown("---")
-        st.markdown("##### About")
-        st.info("IIC Event Report System v1.0\n\nDeveloped for Ministry of Education's Innovation Cell")
-    
-    # Check if configuration is complete
-    if not all([gemini_api_key, service_account_json, spreadsheet_id, drive_folder_id]):
-        st.warning("⚠️ Please complete the configuration in the sidebar to proceed.")
-        return
-    
-    # Initialize Google Services
-    try:
-        credentials_dict = json.load(service_account_json)
-        google_services = GoogleServicesManager(credentials_dict, gemini_api_key)
-        st.success("✅ Google services initialized successfully!")
-    except Exception as e:
-        st.error(f"❌ Error initializing Google services: {str(e)}")
-        return
-    
     # Activity Type Selection
     activity_type = StreamlitUI.render_activity_type_selection()
     
