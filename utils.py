@@ -21,7 +21,8 @@ import numpy as np
 # --- Google Services Setup ---
 SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
-    'https://www.googleapis.com/auth/drive'
+    'https://www.googleapis.com/auth/drive',
+    'https://www.googleapis.com/auth/drive.file'
 ]
 
 def get_google_services(client_secret_path='client_secret.json', allow_interactive=False):
@@ -302,72 +303,82 @@ def create_drive_folder(drive_service, folder_name, parent_id):
         print(f"Error creating folder: {e}")
         return None
 
-def upload_to_drive(drive_service, file_obj, filename, folder_id, mimetype=None):
+def upload_to_drive(service, file_obj, filename, folder_id=None, mimetype=None):
     """
-    Uploads a file to Google Drive.
-    Saves to a temporary file on disk first to ensure reliability with Streamlit.
+    Upload a file to Google Drive with smart error handling
+    
+    Args:
+        service: Google Drive service
+        file_obj: File object, BytesIO, or UploadedFile
+        filename: Name for the file
+        folder_id: Parent folder ID
+        mimetype: MIME type
+    
+    Returns:
+        str: Web view link or error message
     """
-    temp_path = None
     try:
-        from googleapiclient.http import MediaFileUpload
+        # Detect auth type
+        auth_type = getattr(service, '_auth_type', 'unknown')
         
-        # 1. Save Streamlit file to a temporary file on disk
-        suffix = os.path.splitext(filename)[1]
-        if not suffix:
-            suffix = ".tmp"
-            
-        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-            if hasattr(file_obj, 'read'):
-                file_obj.seek(0)
-                tmp.write(file_obj.read())
+        # Determine mimetype if not provided
+        if not mimetype:
+            if filename.endswith('.pdf'):
+                mimetype = 'application/pdf'
+            elif filename.endswith(('.png', '.jpg', '.jpeg')):
+                mimetype = 'image/jpeg'
             else:
-                tmp.write(file_obj)
-            temp_path = tmp.name
-            
-        print(f"DEBUG: Saved temp file to {temp_path}")
-
-        # 2. Upload from Disk
-        file_metadata = {
-            'name': filename,
-            'parents': [folder_id]
-        }
+                mimetype = 'application/octet-stream'
         
-        if mimetype is None:
-            # Let Google guess or default
-            mimetype = 'application/octet-stream'
-
-        media = MediaFileUpload(temp_path, mimetype=mimetype, resumable=True)
-        file = drive_service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink').execute()
+        file_metadata = {'name': filename}
+        if folder_id:
+            file_metadata['parents'] = [folder_id]
         
-        print(f"DEBUG: Uploaded {filename} -> {file.get('id')}")
-        return file.get('webViewLink')
-
-    except HttpError as e:
-        reason = ""
-        try:
-            reason = e.resp.get('content', b'').decode('utf-8')
-        except:
-            pass
-            
-        if "storageQuotaExceeded" in str(e) or "Service Accounts do not have storage quota" in reason:
-            msg = "QUOTA_ERROR: Service Account cannot own files. Use a Shared Drive or Re-Authenticate."
-            print(f"UPLOAD ERROR: {msg}")
-            return msg
+        # Handle different file object types
+        if hasattr(file_obj, 'read'):
+            file_obj.seek(0)  # Reset pointer
+            media = MediaIoBaseUpload(file_obj, mimetype=mimetype, resumable=True)
         else:
-            print(f"Error uploading file {filename}: {e}")
-            st.error(f"❌ Failed to upload {filename}: {e}")
-            return None
+            # Convert bytes to BytesIO
+            file_obj = io.BytesIO(file_obj)
+            media = MediaIoBaseUpload(file_obj, mimetype=mimetype, resumable=True)
+        
+        file = service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id, webViewLink'
+        ).execute()
+        
+        # Make file viewable by anyone with link
+        try:
+            permission = {
+                'type': 'anyone',
+                'role': 'reader'
+            }
+            service.permissions().create(
+                fileId=file.get('id'),
+                body=permission
+            ).execute()
+        except:
+            pass  # Permission setting is optional
+        
+        return file.get('webViewLink', file.get('id'))
+        
     except Exception as e:
-        print(f"Error uploading file {filename}: {e}")
+        error_msg = str(e).lower()
+        
+        # Service Account specific errors
+        if "quota" in error_msg or "insufficient" in error_msg or "storage" in error_msg:
+            print(f"❌ Upload Failed: Service Account Limitation")
+            print(f"   File: {filename}")
+            print(f"   Error: {e}")
+            
+            return "QUOTA_ERROR"
+        
+        # General error
+        print(f"❌ Upload error for {filename}: {e}")
         st.error(f"❌ Failed to upload {filename}: {e}")
         return None
-    finally:
-        # 3. Cleanup
-        if temp_path and os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except:
-                pass
 
 # --- Google Sheets Integration ---
 # --- Google Sheets Integration ---
