@@ -24,66 +24,70 @@ SCOPES = [
 ]
 
 def get_google_services(client_secret_path='client_secret.json'):
-    """Authenticates using OAuth 2.0 User Credentials (Prioritized for Drive Quota)."""
-    creds = None
+    """
+    Authenticates using OAuth 2.0 User Credentials (Required for Drive Uploads).
+    Falls back to Service Account for Sheets ONLY.
+    """
+    user_creds = None
     auth_source = "None"
     
     # 1. Try User Credentials (token.pickle)
     if os.path.exists('token.pickle'):
         try:
             with open('token.pickle', 'rb') as token:
-                creds = pickle.load(token)
-                if creds and creds.valid:
+                user_creds = pickle.load(token)
+                if user_creds and user_creds.valid:
                     auth_source = "User (token.pickle)"
         except Exception as e:
             print(f"DEBUG: Error loading token.pickle: {e}")
             
     # 2. If valid user creds, use them
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
+    if not user_creds or not user_creds.valid:
+        if user_creds and user_creds.expired and user_creds.refresh_token:
             try:
-                creds.refresh(Request())
+                user_creds.refresh(Request())
                 auth_source = "User (Refreshed)"
             except Exception as e:
                 print(f"DEBUG: Refresh failed: {e}")
-                creds = None
+                user_creds = None
         
-        if not creds:
+        if not user_creds:
             # 3. Interactive Login (Local)
             if os.path.exists(client_secret_path):
                 print("DEBUG: Starting local auth flow...")
                 try:
                     flow = InstalledAppFlow.from_client_secrets_file(
                         client_secret_path, SCOPES)
-                    creds = flow.run_local_server(port=0)
+                    user_creds = flow.run_local_server(port=0)
                     # Save the credentials for the next run
                     with open('token.pickle', 'wb') as token:
-                        pickle.dump(creds, token)
+                        pickle.dump(user_creds, token)
                     auth_source = "User (New Login)"
                 except Exception as e:
                     print(f"DEBUG: Local auth flow failed: {e}")
-            
-            # 4. Fallback: Service Account from Secrets (Only if User Auth fails/missing)
-            # Note: Service Accounts may fail Drive uploads on personal accounts due to 0 quota.
-            elif "gcp_service_account" in st.secrets:
-                try:
-                    from google.oauth2 import service_account
-                    creds = service_account.Credentials.from_service_account_info(
-                        st.secrets["gcp_service_account"],
-                        scopes=SCOPES
-                    )
-                    auth_source = "Service Account (Fallback)"
-                    print("WARNING: Using Service Account. Drive uploads may fail on personal accounts.")
-                except Exception as e:
-                    print(f"Secrets auth failed: {e}")
+    
+    # Separate credentials for Drive and Sheets
+    drive_creds = user_creds
+    sheets_creds = user_creds
+    
+    # 4. Fallback: Service Account from Secrets (SHEETS ONLY)
+    if not sheets_creds and "gcp_service_account" in st.secrets:
+        try:
+            from google.oauth2 import service_account
+            sheets_creds = service_account.Credentials.from_service_account_info(
+                st.secrets["gcp_service_account"],
+                scopes=SCOPES
+            )
+            auth_source = "Service Account (Sheets Only)"
+            print("WARNING: Using Service Account. Drive uploads DISABLED.")
+        except Exception as e:
+            print(f"Secrets auth failed: {e}")
 
     print(f"DEBUG: Final Auth Source: {auth_source}")
     
-    if not creds:
-        return None, None
-
-    drive_service = build('drive', 'v3', credentials=creds)
-    sheets_service = build('sheets', 'v4', credentials=creds)
+    drive_service = build('drive', 'v3', credentials=drive_creds) if drive_creds else None
+    sheets_service = build('sheets', 'v4', credentials=sheets_creds) if sheets_creds else None
+    
     return drive_service, sheets_service
 
 # --- Gemini Integration ---
