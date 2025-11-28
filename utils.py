@@ -23,27 +23,41 @@ SCOPES = [
 ]
 
 def get_google_services(client_secret_path='client_secret.json'):
-    """Authenticates using OAuth 2.0 User Credentials."""
+    """Authenticates using Service Account from secrets or OAuth 2.0 User Credentials."""
     creds = None
-    # The file token.pickle stores the user's access and refresh tokens
-    if os.path.exists('token.pickle'):
+    
+    # 1. Try Service Account from Streamlit Secrets
+    try:
+        import streamlit as st
+        if "gcp_service_account" in st.secrets:
+            from google.oauth2 import service_account
+            creds = service_account.Credentials.from_service_account_info(
+                st.secrets["gcp_service_account"],
+                scopes=SCOPES
+            )
+    except Exception as e:
+        print(f"Secrets auth failed: {e}")
+
+    # 2. Fallback to Token Pickle (User Credentials)
+    if not creds and os.path.exists('token.pickle'):
         with open('token.pickle', 'rb') as token:
             creds = pickle.load(token)
             
-    # If there are no (valid) credentials available, let the user log in.
-    if not creds or not creds.valid:
+    # 3. Fallback to OAuth Flow
+    if not creds or (hasattr(creds, 'valid') and not creds.valid):
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            if not os.path.exists(client_secret_path):
-                return None, None
-            flow = InstalledAppFlow.from_client_secrets_file(
-                client_secret_path, SCOPES)
-            creds = flow.run_local_server(port=0)
-            
-        # Save the credentials for the next run
-        with open('token.pickle', 'wb') as token:
-            pickle.dump(creds, token)
+            if not creds and os.path.exists(client_secret_path):
+                flow = InstalledAppFlow.from_client_secrets_file(
+                    client_secret_path, SCOPES)
+                creds = flow.run_local_server(port=0)
+                # Save the credentials for the next run
+                with open('token.pickle', 'wb') as token:
+                    pickle.dump(creds, token)
+
+    if not creds:
+        return None, None
 
     drive_service = build('drive', 'v3', credentials=creds)
     sheets_service = build('sheets', 'v4', credentials=creds)
