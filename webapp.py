@@ -10,9 +10,12 @@ import pandas as pd
 import google.generativeai as genai
 from google.oauth2.credentials import Credentials
 from google.oauth2 import service_account
+from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseUpload
 from datetime import datetime, timedelta
+import json
+import pickle
 import json
 import io
 import os
@@ -174,15 +177,44 @@ class GoogleServicesManager:
     
     def __init__(self, credentials_dict: Dict, gemini_api_key: str):
         """Initialize Google Services"""
-        self.credentials = service_account.Credentials.from_service_account_info(
-            credentials_dict,
-            scopes=[
-                'https://www.googleapis.com/auth/spreadsheets',
-                'https://www.googleapis.com/auth/drive.file'
-            ]
-        )
-        self.sheets_service = build('sheets', 'v4', credentials=self.credentials)
-        self.drive_service = build('drive', 'v3', credentials=self.credentials)
+        self.credentials = None
+        self.sheets_service = None
+        self.drive_service = None
+        
+        # 1. Try User Credentials (token.pickle) - Prioritized for Drive Quota & Sheet Access
+        if os.path.exists('token.pickle'):
+            try:
+                with open('token.pickle', 'rb') as token:
+                    self.credentials = pickle.load(token)
+            except Exception as e:
+                st.warning(f"Failed to load user credentials: {e}")
+
+        # 2. If User Creds invalid/missing, try Service Account
+        if not self.credentials or not self.credentials.valid:
+            if self.credentials and self.credentials.expired and self.credentials.refresh_token:
+                try:
+                    self.credentials.refresh(Request())
+                except:
+                    self.credentials = None
+            
+            if not self.credentials:
+                # Fallback to Service Account (from secrets/upload)
+                try:
+                    self.credentials = service_account.Credentials.from_service_account_info(
+                        credentials_dict,
+                        scopes=[
+                            'https://www.googleapis.com/auth/spreadsheets',
+                            'https://www.googleapis.com/auth/drive'
+                        ]
+                    )
+                except Exception as e:
+                    st.error(f"Failed to initialize Service Account: {e}")
+        
+        if self.credentials:
+            self.sheets_service = build('sheets', 'v4', credentials=self.credentials)
+            self.drive_service = build('drive', 'v3', credentials=self.credentials)
+        else:
+            st.error("❌ No valid authentication found. Please login or configure secrets.")
         
         # Initialize Gemini AI
         genai.configure(api_key=gemini_api_key)
