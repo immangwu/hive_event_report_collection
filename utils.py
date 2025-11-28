@@ -280,39 +280,56 @@ def create_drive_folder(drive_service, folder_name, parent_id):
         return None
 
 def upload_to_drive(drive_service, file_obj, filename, folder_id, mimetype=None):
-    """Uploads a file to Google Drive."""
+    """
+    Uploads a file to Google Drive.
+    Saves to a temporary file on disk first to ensure reliability with Streamlit.
+    """
+    temp_path = None
     try:
-        from googleapiclient.http import MediaIoBaseUpload
+        from googleapiclient.http import MediaFileUpload
         
+        # 1. Save Streamlit file to a temporary file on disk
+        suffix = os.path.splitext(filename)[1]
+        if not suffix:
+            suffix = ".tmp"
+            
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            if hasattr(file_obj, 'read'):
+                file_obj.seek(0)
+                tmp.write(file_obj.read())
+            else:
+                tmp.write(file_obj)
+            temp_path = tmp.name
+            
+        print(f"DEBUG: Saved temp file to {temp_path}")
+
+        # 2. Upload from Disk
         file_metadata = {
             'name': filename,
             'parents': [folder_id]
         }
         
-        # Ensure we have a clean BytesIO object
-        # This fixes issues where Streamlit UploadedFile might not behave exactly as MediaIoBaseUpload expects
-        if hasattr(file_obj, 'read'):
-            file_obj.seek(0)
-            content = file_obj.read()
-            media_stream = io.BytesIO(content)
-        else:
-            media_stream = io.BytesIO(file_obj)
-
         if mimetype is None:
-            if hasattr(file_obj, 'type'):
-                mimetype = file_obj.type
-            else:
-                mimetype = 'application/octet-stream'
-                
-        media = MediaIoBaseUpload(media_stream, mimetype=mimetype, resumable=True)
+            # Let Google guess or default
+            mimetype = 'application/octet-stream'
+
+        media = MediaFileUpload(temp_path, mimetype=mimetype, resumable=True)
         file = drive_service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink').execute()
         
         print(f"DEBUG: Uploaded {filename} -> {file.get('id')}")
         return file.get('webViewLink')
+
     except Exception as e:
         print(f"Error uploading file {filename}: {e}")
         st.error(f"❌ Failed to upload {filename}: {e}")
         return None
+    finally:
+        # 3. Cleanup
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except:
+                pass
 
 # --- Google Sheets Integration ---
 # --- Google Sheets Integration ---
