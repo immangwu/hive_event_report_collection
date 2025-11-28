@@ -91,15 +91,6 @@ if st.sidebar.button("🔄 Re-Authenticate Google Drive"):
     except Exception as e:
         st.sidebar.error(f"Error: {e}")
 
-# --- Main App ---
-# ... (existing code) ...
-
-# ... inside the submit logic ...
-                if drive_service:
-                    # ... upload logic ...
-                else:
-                    st.warning("⚠️ Google Drive Service not connected. Files will NOT be uploaded.")
-                    st.info("👉 Please click '🔄 Re-Authenticate Google Drive' in the sidebar to fix this.")
 
 # --- Main App ---
 st.markdown('<div class="main-header">📝 Event Report Submission Portal</div>', unsafe_allow_html=True)
