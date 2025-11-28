@@ -52,8 +52,27 @@ def get_google_services(client_secret_path='client_secret.json'):
                 user_creds = None
         
         if not user_creds:
-            # 3. Interactive Login (Local)
-            if os.path.exists(client_secret_path):
+            # 2a. Try Secrets (Headless / Cloud)
+            if "google_oauth" in st.secrets:
+                try:
+                    print("DEBUG: Found google_oauth in secrets, attempting to build credentials...")
+                    oauth_secrets = st.secrets["google_oauth"]
+                    user_creds = Credentials(
+                        token=None,
+                        refresh_token=oauth_secrets["refresh_token"],
+                        client_id=oauth_secrets["client_id"],
+                        client_secret=oauth_secrets["client_secret"],
+                        token_uri=oauth_secrets["token_uri"]
+                    )
+                    # Force refresh to get a valid access token
+                    user_creds.refresh(Request())
+                    auth_source = "User (from Secrets)"
+                except Exception as e:
+                    print(f"DEBUG: Secrets auth failed: {e}")
+                    user_creds = None
+
+            # 3. Interactive Login (Local) - Only if secrets failed/missing
+            if not user_creds and os.path.exists(client_secret_path):
                 print("DEBUG: Starting local auth flow...")
                 try:
                     flow = InstalledAppFlow.from_client_secrets_file(
