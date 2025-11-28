@@ -78,6 +78,29 @@ if st.sidebar.button("🧪 Test Google Sheet Connection"):
     except Exception as e:
         st.sidebar.error(f"Error: {e}")
 
+if st.sidebar.button("🔄 Re-Authenticate Google Drive"):
+    if os.path.exists('token.pickle'):
+        os.remove('token.pickle')
+    st.sidebar.info("Please check your browser/terminal for Google Login...")
+    try:
+        ds, ss = utils.get_google_services()
+        if ds:
+            st.sidebar.success("✅ Authentication Successful! You can now upload.")
+        else:
+            st.sidebar.error("❌ Authentication Failed. Check terminal output.")
+    except Exception as e:
+        st.sidebar.error(f"Error: {e}")
+
+# --- Main App ---
+# ... (existing code) ...
+
+# ... inside the submit logic ...
+                if drive_service:
+                    # ... upload logic ...
+                else:
+                    st.warning("⚠️ Google Drive Service not connected. Files will NOT be uploaded.")
+                    st.info("👉 Please click '🔄 Re-Authenticate Google Drive' in the sidebar to fix this.")
+
 # --- Main App ---
 st.markdown('<div class="main-header">📝 Event Report Submission Portal</div>', unsafe_allow_html=True)
 
@@ -492,7 +515,8 @@ if st.session_state.report_stage == "draft_generated":
                     else:
                         st.error("Failed to create event folder in Drive. Check permissions.")
                 else:
-                    st.warning("Google Drive Service not connected. Files will not be uploaded.")
+                    st.warning("⚠️ Google Drive Service not connected. Files will NOT be uploaded.")
+                    st.info("👉 Please click '🔄 Re-Authenticate Google Drive' in the sidebar to fix this.")
 
                 # 3. Prepare Final Data Dictionary
                 financial_summary = f"Income: {total_income} | Expense: {total_expense} | Balance: {balance}\n"
