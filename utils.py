@@ -264,17 +264,29 @@ def upload_to_drive(drive_service, file_obj, filename, folder_id, mimetype=None)
             'parents': [folder_id]
         }
         
+        # Ensure we have a clean BytesIO object
+        # This fixes issues where Streamlit UploadedFile might not behave exactly as MediaIoBaseUpload expects
+        if hasattr(file_obj, 'read'):
+            file_obj.seek(0)
+            content = file_obj.read()
+            media_stream = io.BytesIO(content)
+        else:
+            media_stream = io.BytesIO(file_obj)
+
         if mimetype is None:
             if hasattr(file_obj, 'type'):
                 mimetype = file_obj.type
             else:
                 mimetype = 'application/octet-stream'
                 
-        media = MediaIoBaseUpload(file_obj, mimetype=mimetype, resumable=True)
+        media = MediaIoBaseUpload(media_stream, mimetype=mimetype, resumable=True)
         file = drive_service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink').execute()
+        
+        print(f"DEBUG: Uploaded {filename} -> {file.get('id')}")
         return file.get('webViewLink')
     except Exception as e:
-        print(f"Error uploading file: {e}")
+        print(f"Error uploading file {filename}: {e}")
+        st.error(f"❌ Failed to upload {filename}: {e}")
         return None
 
 # --- Google Sheets Integration ---
