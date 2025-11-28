@@ -26,25 +26,42 @@ SCOPES = [
 def get_google_services(client_secret_path='client_secret.json'):
     """Authenticates using OAuth 2.0 User Credentials (Prioritized for Drive Quota)."""
     creds = None
+    auth_source = "None"
     
     # 1. Try User Credentials (token.pickle)
     if os.path.exists('token.pickle'):
-        with open('token.pickle', 'rb') as token:
-            creds = pickle.load(token)
+        try:
+            with open('token.pickle', 'rb') as token:
+                creds = pickle.load(token)
+                if creds and creds.valid:
+                    auth_source = "User (token.pickle)"
+        except Exception as e:
+            print(f"DEBUG: Error loading token.pickle: {e}")
             
     # 2. If valid user creds, use them
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
+            try:
+                creds.refresh(Request())
+                auth_source = "User (Refreshed)"
+            except Exception as e:
+                print(f"DEBUG: Refresh failed: {e}")
+                creds = None
+        
+        if not creds:
             # 3. Interactive Login (Local)
             if os.path.exists(client_secret_path):
-                flow = InstalledAppFlow.from_client_secrets_file(
-                    client_secret_path, SCOPES)
-                creds = flow.run_local_server(port=0)
-                # Save the credentials for the next run
-                with open('token.pickle', 'wb') as token:
-                    pickle.dump(creds, token)
+                print("DEBUG: Starting local auth flow...")
+                try:
+                    flow = InstalledAppFlow.from_client_secrets_file(
+                        client_secret_path, SCOPES)
+                    creds = flow.run_local_server(port=0)
+                    # Save the credentials for the next run
+                    with open('token.pickle', 'wb') as token:
+                        pickle.dump(creds, token)
+                    auth_source = "User (New Login)"
+                except Exception as e:
+                    print(f"DEBUG: Local auth flow failed: {e}")
             
             # 4. Fallback: Service Account from Secrets (Only if User Auth fails/missing)
             # Note: Service Accounts may fail Drive uploads on personal accounts due to 0 quota.
@@ -55,9 +72,13 @@ def get_google_services(client_secret_path='client_secret.json'):
                         st.secrets["gcp_service_account"],
                         scopes=SCOPES
                     )
+                    auth_source = "Service Account (Fallback)"
+                    print("WARNING: Using Service Account. Drive uploads may fail on personal accounts.")
                 except Exception as e:
                     print(f"Secrets auth failed: {e}")
 
+    print(f"DEBUG: Final Auth Source: {auth_source}")
+    
     if not creds:
         return None, None
 

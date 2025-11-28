@@ -618,6 +618,15 @@ if st.session_state.report_stage == "draft_generated":
                                 st.success(f"✅ Generated Report uploaded to Drive!")
                         except Exception as e:
                             st.error(f"Failed to upload report to Drive: {e}")
+                    
+                    # Provide Download Button
+                    with open(pdf_filename, "rb") as f:
+                        st.download_button(
+                            label="📥 Download Generated Report",
+                            data=f,
+                            file_name=pdf_filename,
+                            mime="application/pdf"
+                        )
 
                 # 6. Log to Sheets
                 if sheets_service:
