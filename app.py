@@ -1,7 +1,7 @@
 
 import streamlit as st
 import pandas as pd
-from datetime import date
+from datetime import date, datetime
 import config
 import utils
 import os
@@ -52,9 +52,20 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Initialize Services
+drive_service, sheets_service = utils.get_google_services()
+
 # --- Sidebar ---
 st.sidebar.title("🔧 Configuration")
 st.sidebar.info("Credentials are loaded from `config.py`.")
+
+# Show Service Account Email if available
+if "gcp_service_account" in st.secrets:
+    sa_email = st.secrets["gcp_service_account"]["client_email"]
+    st.sidebar.success(f"🤖 Service Account Active")
+    st.sidebar.code(sa_email)
+    st.sidebar.info("👆 Share your Drive folder with this email!")
+
 st.sidebar.markdown("---")
 st.sidebar.info("Ensure `client_secret.json` (OAuth) is present in the app directory.")
 
@@ -66,10 +77,9 @@ if not os.path.exists("logos") or not os.listdir("logos"):
 # Test Connection Button
 if st.sidebar.button("🧪 Test Google Sheet Connection"):
     try:
-        ds, ss = utils.get_google_services()
-        if ss:
+        if sheets_service:
             test_data = {"Program Name": "TEST_CONNECTION", "Activity Type": "Test", "Timestamp": str(datetime.now())}
-            if utils.append_to_sheet(ss, config.GOOGLE_SHEET_ID, test_data):
+            if utils.append_to_sheet(sheets_service, config.GOOGLE_SHEET_ID, test_data):
                 st.sidebar.success("✅ Connected to 'IIC8 reports'!")
             else:
                 st.sidebar.error("❌ Write Failed")
@@ -83,9 +93,13 @@ if st.sidebar.button("🔄 Re-Authenticate Google Drive"):
         os.remove('token.pickle')
     st.sidebar.info("Please check your browser/terminal for Google Login...")
     try:
-        ds, ss = utils.get_google_services()
+        # Force interactive login
+        ds, ss = utils.get_google_services(allow_interactive=True)
         if ds:
             st.sidebar.success("✅ Authentication Successful! You can now upload.")
+            # Update global vars
+            drive_service = ds
+            sheets_service = ss
         else:
             st.sidebar.error("❌ Authentication Failed. Check terminal output.")
     except Exception as e:
@@ -95,17 +109,77 @@ if st.sidebar.button("🔄 Re-Authenticate Google Drive"):
 # --- Main App ---
 st.markdown('<div class="main-header">📝 Event Report Submission Portal</div>', unsafe_allow_html=True)
 
-# Initialize Session State for Auto-Fill
+# Initialize Session State
 if 'form_data' not in st.session_state:
     st.session_state.form_data = {}
-
-
+if 'file_links' not in st.session_state:
+    st.session_state.file_links = {}
+if 'event_folder_id' not in st.session_state:
+    st.session_state.event_folder_id = None
 
 # Helper to get value from session state or default
 def get_val(key, default):
     return st.session_state.form_data.get(key, default)
 
+# Helper for Immediate Uploads
+def render_upload_section(label, key, program_name_val):
+    uploaded_file = st.file_uploader(label, type=['png', 'jpg', 'jpeg', 'pdf'], key=key)
+    
+    if uploaded_file:
+        # Check if already uploaded
+        if key in st.session_state.file_links:
+            st.success(f"✅ Uploaded! [View File]({st.session_state.file_links[key]})")
+            uploaded_file.seek(0)
+            return uploaded_file
+            
+        # Not uploaded yet
+        if not program_name_val:
+            st.warning("⚠️ Please enter 'Program/Activity Name' above to enable uploads.")
+            return uploaded_file
+            
+        if not drive_service:
+            st.error("❌ Google Drive not connected.")
+            return uploaded_file
 
+        # Create Folder if needed
+        if not st.session_state.event_folder_id:
+            folder_name = f"{program_name_val}_{date.today()}"
+            folder_name = folder_name.replace("/", "_").replace(":", "-")
+            with st.spinner(f"Creating folder '{folder_name}'..."):
+                fid = utils.create_drive_folder(drive_service, folder_name, config.DRIVE_PARENT_FOLDER_ID)
+                if fid:
+                    st.session_state.event_folder_id = fid
+                    st.success(f"📂 Created Folder: {folder_name}")
+                else:
+                    st.error("❌ Failed to create folder. Check permissions.")
+                    return uploaded_file
+        
+        # Upload File
+        if st.session_state.event_folder_id:
+            with st.spinner(f"Uploading {label}..."):
+                # Reset pointer
+                uploaded_file.seek(0)
+                link = utils.upload_to_drive(drive_service, uploaded_file, f"{key}_{program_name_val}", st.session_state.event_folder_id)
+                
+                if link and "QUOTA_ERROR" in link:
+                    st.error("❌ **Upload Failed: Service Account Limitation**")
+                    st.warning("Service Accounts cannot own files in personal Google Drives. You must either:")
+                    st.markdown("1. **Share a Folder from a Shared Drive (Team Drive)** with the Service Account.")
+                    st.markdown("2. **OR** Switch to Interactive Authentication below.")
+                    if st.button("🔄 Switch to Interactive Auth (Browser Login)", key=f"auth_fix_{key}"):
+                        st.info("Please use the 'Re-Authenticate' button in the Sidebar.")
+                    return uploaded_file
+                
+                if link:
+                    st.session_state.file_links[key] = link
+                    st.success(f"✅ Uploaded!")
+                    st.rerun() # Rerun to update state and show link
+                else:
+                    st.error("❌ Upload failed.")
+    
+    if uploaded_file:
+        uploaded_file.seek(0)
+    return uploaded_file
 
 # ==========================================
 # SECTION 2: EVENT DETAILS
@@ -266,25 +340,31 @@ with st.expander("📸 Photos & Media", expanded=True):
     with col_p1:
         st.markdown("##### 📍 Geotagged Photos")
         for i in range(1, 6):
-            uploaded_files[f"Geotagged Photo {i}"] = st.file_uploader(f"Geotagged Photo {i}", type=['png', 'jpg', 'jpeg'], key=f"geo_{i}")
+            label = f"Geotagged Photo {i}"
+            key = f"geo_{i}"
+            uploaded_files[label] = render_upload_section(label, key, program_name)
             
     with col_p2:
         st.markdown("##### 🖼️ Non-Geotagged Photos")
         for i in range(1, 6):
-            uploaded_files[f"Non-Geotagged Photo {i}"] = st.file_uploader(f"Non-Geotagged Photo {i}", type=['png', 'jpg', 'jpeg'], key=f"non_geo_{i}")
+            label = f"Non-Geotagged Photo {i}"
+            key = f"non_geo_{i}"
+            uploaded_files[label] = render_upload_section(label, key, program_name)
 
 with st.expander("📄 Core Documents", expanded=False):
-    uploaded_files["Event SOP"] = st.file_uploader("Event SOP (Signed by Principal)", type=['pdf'])
+    uploaded_files["Event SOP"] = render_upload_section("Event SOP (Signed by Principal)", "sop", program_name)
+    
     # Report Summary upload removed - replaced by AI generation
     minute_to_minute = st.text_area("Minute-to-Minute Flow / Event Highlights (for AI Report)", height=150, placeholder="Enter the detailed flow of the event...")
-    uploaded_files["Attendance"] = st.file_uploader("Attendance Sheet", type=['pdf'])
-    uploaded_files["Registration Forms"] = st.file_uploader("Registration Forms (Google Form)", type=['pdf', 'csv', 'xlsx'])
+    
+    uploaded_files["Attendance"] = render_upload_section("Attendance Sheet", "attendance", program_name)
+    uploaded_files["Registration Forms"] = render_upload_section("Registration Forms (Google Form)", "registration", program_name)
 
 with st.expander("📂 Additional Evidence (Bulk Upload Optional)", expanded=False):
     st.write("Upload other documents as per the checklist (Brochures, Feedback, etc.)")
-    uploaded_files["Brochure"] = st.file_uploader("Event Brochure/Poster", type=['pdf', 'png', 'jpg'])
-    uploaded_files["Feedback"] = st.file_uploader("Feedback Samples", type=['pdf', 'png', 'jpg'])
-    uploaded_files["Speaker Profile"] = st.file_uploader("Resource Person Profile", type=['pdf'])
+    uploaded_files["Brochure"] = render_upload_section("Event Brochure/Poster", "brochure", program_name)
+    uploaded_files["Feedback"] = render_upload_section("Feedback Samples", "feedback", program_name)
+    uploaded_files["Speaker Profile"] = render_upload_section("Resource Person Profile", "speaker_profile", program_name)
 
 # ==========================================
 # SECTION 5: SOCIAL MEDIA
@@ -484,32 +564,9 @@ if st.session_state.report_stage == "draft_generated":
     with c_sub2:
         if st.button("🚀 Confirm & Upload Report", type="primary"):
             with st.spinner("Finalizing Submission..."):
-                # 1. Authenticate Google Services
-                drive_service, sheets_service = utils.get_google_services()
+                # Services are initialized globally
                 
-                # 2. Upload Files to Drive
-                file_links = {}
-                if drive_service:
-                    folder_name = f"{program_name}_{date.today()}"
-                    # Sanitize folder name
-                    folder_name = folder_name.replace("/", "_").replace(":", "-")
-                    
-                    event_folder_id = utils.create_drive_folder(drive_service, folder_name, config.DRIVE_PARENT_FOLDER_ID)
-                    
-                    if event_folder_id:
-                        for key, file_obj in uploaded_files.items():
-                            if file_obj:
-                                # Reset pointer for upload
-                                file_obj.seek(0)
-                                link = utils.upload_to_drive(drive_service, file_obj, f"{key}_{program_name}", event_folder_id)
-                                file_links[key] = link
-                    else:
-                        st.error("Failed to create event folder in Drive. Check permissions.")
-                else:
-                    st.warning("⚠️ Google Drive Service not connected. Files will NOT be uploaded.")
-                    st.info("👉 Please click '🔄 Re-Authenticate Google Drive' in the sidebar to fix this.")
-
-                # 3. Prepare Final Data Dictionary
+                # Prepare Final Data Dictionary
                 financial_summary = f"Income: {total_income} | Expense: {total_expense} | Balance: {balance}\n"
                 for index, row in financial_df.iterrows():
                     financial_summary += f"{row['Description']} ({row['Type']}): {row['Amount']}\n"
@@ -591,7 +648,7 @@ if st.session_state.report_stage == "draft_generated":
                     "Success Story": success_story,
                     "Acknowledgement": acknowledgement,
 
-                    **file_links 
+                    **st.session_state.file_links 
                 }
 
                 # 4. Generate Charts & Finalize Data
@@ -604,6 +661,9 @@ if st.session_state.report_stage == "draft_generated":
                     data["Chart Paths"] = chart_paths
                     
                     # Upload Charts to Drive
+                    # Use global drive_service and session state folder id
+                    event_folder_id = st.session_state.event_folder_id
+                    
                     if drive_service and event_folder_id:
                         for path in chart_paths:
                             try:
@@ -618,6 +678,8 @@ if st.session_state.report_stage == "draft_generated":
                 pdf_filename = f"Report_{safe_prog_name}.pdf"
                 
                 # Pass uploaded_files dictionary to generate_pdf for embedding
+                # NOTE: uploaded_files dict contains the file objects from the render_upload_section calls
+                # We ensured they are reset to 0 in render_upload_section
                 utils.generate_pdf(data, pdf_filename, uploaded_files)
                 
                 with open(pdf_filename, "rb") as pdf_file:

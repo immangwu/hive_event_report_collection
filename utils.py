@@ -6,6 +6,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
+from googleapiclient.errors import HttpError
 from fpdf import FPDF
 import pandas as pd
 from datetime import datetime
@@ -23,7 +24,7 @@ SCOPES = [
     'https://www.googleapis.com/auth/drive'
 ]
 
-def get_google_services(client_secret_path='client_secret.json'):
+def get_google_services(client_secret_path='client_secret.json', allow_interactive=False):
     """
     Authenticates using OAuth 2.0 User Credentials (Required for Drive Uploads).
     Falls back to Service Account for Sheets ONLY.
@@ -71,8 +72,8 @@ def get_google_services(client_secret_path='client_secret.json'):
                     print(f"DEBUG: Secrets auth failed: {e}")
                     user_creds = None
 
-            # 3. Interactive Login (Local) - Only if secrets failed/missing
-            if not user_creds and os.path.exists(client_secret_path):
+            # 3. Interactive Login (Local) - Only if secrets failed/missing AND allowed
+            if not user_creds and os.path.exists(client_secret_path) and allow_interactive:
                 print("DEBUG: Starting local auth flow...")
                 try:
                     flow = InstalledAppFlow.from_client_secrets_file(
@@ -98,11 +99,14 @@ def get_google_services(client_secret_path='client_secret.json'):
                 scopes=SCOPES
             )
             auth_source = "Service Account (Sheets Only)"
-            print("WARNING: Using Service Account. Drive uploads DISABLED.")
+            print("WARNING: Using Service Account. Drive uploads enabled (Quota limits apply).")
         except Exception as e:
             print(f"Secrets auth failed: {e}")
 
     print(f"DEBUG: Final Auth Source: {auth_source}")
+    
+    # Allow Drive service for Service Account too if scopes are correct
+    drive_creds = user_creds if user_creds else sheets_creds
     
     drive_service = build('drive', 'v3', credentials=drive_creds) if drive_creds else None
     sheets_service = build('sheets', 'v4', credentials=sheets_creds) if sheets_creds else None
@@ -338,6 +342,21 @@ def upload_to_drive(drive_service, file_obj, filename, folder_id, mimetype=None)
         print(f"DEBUG: Uploaded {filename} -> {file.get('id')}")
         return file.get('webViewLink')
 
+    except HttpError as e:
+        reason = ""
+        try:
+            reason = e.resp.get('content', b'').decode('utf-8')
+        except:
+            pass
+            
+        if "storageQuotaExceeded" in str(e) or "Service Accounts do not have storage quota" in reason:
+            msg = "QUOTA_ERROR: Service Account cannot own files. Use a Shared Drive or Re-Authenticate."
+            print(f"UPLOAD ERROR: {msg}")
+            return msg
+        else:
+            print(f"Error uploading file {filename}: {e}")
+            st.error(f"❌ Failed to upload {filename}: {e}")
+            return None
     except Exception as e:
         print(f"Error uploading file {filename}: {e}")
         st.error(f"❌ Failed to upload {filename}: {e}")
